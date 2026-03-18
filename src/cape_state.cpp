@@ -37,7 +37,8 @@ static constexpr f32 CLIMB_SPEED_COST = 0.09f;  // climbing costs meaningful spe
 static s32 sTakeoffTimer = 0;
 static s32 sFlightFrames = 0;
 static bool sInTakeoff = false;
-static f32 sVerticalSpeed = 0.0f;  // track vy separately for smooth acceleration
+static f32 sVerticalSpeed = 0.0f;
+static bool sFlightAnimSet = false;  // only set animation once to avoid sound restart
 
 void startCapeFlight(TMario *player) {
     CapeData *cape = getCapeData(player);
@@ -50,7 +51,21 @@ void startCapeFlight(TMario *player) {
     sTakeoffTimer = TAKEOFF_FRAMES;
     sFlightFrames = 0;
     sVerticalSpeed = 0.0f;
+    sFlightAnimSet = false;
     sInTakeoff = true;
+}
+
+static void endFlight(TMario *player, CapeData *cape) {
+    cape->isGliding = false;
+    player->mAngle.z = 0;
+    player->mSpeed.x = 0.0f;
+    player->mSpeed.y = 0.0f;
+    player->mSpeed.z = 0.0f;
+    player->mForwardSpeed = 0.0f;
+    sVerticalSpeed = 0.0f;
+    sInTakeoff = false;
+    // Force Mario into fall state so he doesn't resume the triple jump
+    player->changePlayerStatus(0x88C, 0, false);  // STATE_FALL
 }
 
 void updateCapeGlide(TMario *player) {
@@ -59,16 +74,13 @@ void updateCapeGlide(TMario *player) {
         return;
 
     if (!cape->hasCape) {
-        cape->isGliding = false;
-        player->mAngle.z = 0;
+        endFlight(player, cape);
         return;
     }
 
     u32 padInput = player->mController->mButtons.mInput;
     if (padInput & 0x4) {  // D-pad Down exits
-        cape->isGliding = false;
-        player->mAngle.z = 0;
-        sInTakeoff = false;
+        endFlight(player, cape);
         return;
     }
 
@@ -100,9 +112,9 @@ void updateCapeGlide(TMario *player) {
         player->mSpeed.z = TAKEOFF_FORWARD_SPEED * cosf(yawRad);
         player->mForwardSpeed = TAKEOFF_FORWARD_SPEED;
 
-        // Transition to flight animation partway through takeoff
+        // Transition to glide pose partway through takeoff
         if (sTakeoffTimer < 60) {
-            player->setAnimation(0x4C, 1.0f);  // fall/arms spread
+            player->setAnimation(0xAE, 0.0f);  // dive_wait, speed 0 = hold pose
         }
 
         if (sTakeoffTimer <= 0) {
@@ -164,8 +176,9 @@ void updateCapeGlide(TMario *player) {
     if (sVerticalSpeed > 30.0f) sVerticalSpeed = 30.0f;
     if (sVerticalSpeed < -30.0f) sVerticalSpeed = -30.0f;
 
-    // Lock flight animation every frame
-    player->setAnimation(0x4C, 1.0f);  // fall/arms spread
+    // Keep glide animation locked every frame (game tries to override it)
+    // setAnimation internally checks if ID matches, won't restart if same
+    player->setAnimation(0xAE, 0.0f);  // dive_wait, speed 0 = hold pose
 
     // Forward speed: drag + clamp
     cape->glideSpeed -= DRAG;
@@ -174,8 +187,7 @@ void updateCapeGlide(TMario *player) {
 
     // Stall (after grace)
     if (sFlightFrames > 60 && cape->glideSpeed < STALL_SPEED) {
-        cape->isGliding = false;
-        player->mAngle.z = 0;
+        endFlight(player, cape);
         return;
     }
 
@@ -188,30 +200,20 @@ void updateCapeGlide(TMario *player) {
 
     // Water collision
     if (player->mTranslation.y <= player->mWaterHeight && player->mWaterHeight > -10000.0f) {
-        cape->isGliding = false;
-        player->mAngle.z = 0;
-        sVerticalSpeed = 0.0f;
-        sInTakeoff = false;
+        endFlight(player, cape);
         return;
     }
 
     // Wall collision
     if (player->mWallTriangle != nullptr) {
-        cape->isGliding = false;
-        player->mAngle.z = 0;
-        sVerticalSpeed = 0.0f;
-        sInTakeoff = false;
+        endFlight(player, cape);
         return;
     }
 
     // Ground collision (after grace)
     if (sFlightFrames > 60 && sVerticalSpeed < 0.0f && player->mTranslation.y <= player->mFloorBelow + 10.0f) {
         player->mTranslation.y = player->mFloorBelow;
-        player->mSpeed.y = 0.0f;
-        sVerticalSpeed = 0.0f;
-        cape->isGliding = false;
-        player->mAngle.z = 0;
-        sInTakeoff = false;
+        endFlight(player, cape);
         return;
     }
 }

@@ -1,10 +1,13 @@
 #include <BetterSMS/module.hxx>
+#include <BetterSMS/game.hxx>
 #include <BetterSMS/object.hxx>
 #include <BetterSMS/player.hxx>
 #include <BetterSMS/settings.hxx>
 #include <BetterSMS/stage.hxx>
 #include <SMS/Player/Mario.hxx>
 #include <SMS/Player/MarioGamePad.hxx>
+#include <SMS/System/Application.hxx>
+#include <SMS/System/GameSequence.hxx>
 #include "cape_box.hxx"
 #include "cape_data.hxx"
 #include "cape_timer.hxx"
@@ -15,6 +18,7 @@ void updateCapeVisual(TMario *player);
 static BetterSMS::Settings::SettingsGroup sSettingsGroup(1, 0, BetterSMS::Settings::Priority::MODE);
 static BetterSMS::ModuleInfo sModuleInfo("Cape Powerup", 1, 0, &sSettingsGroup);
 static CapeData sPlayerCapeData;
+static bool sFlightActivatedThisJump = false;
 
 BETTER_SMS_FOR_CALLBACK void onPlayerInit(TMario *player, bool isMario) {
     if (!isMario)
@@ -63,11 +67,17 @@ BETTER_SMS_FOR_CALLBACK void onPlayerUpdate(TMario *player, bool isMario) {
     if (!cape->hasCape)
         return;
 
-    // Activate flight on triple jump (STATE_TRIPLE_J = 0x882)
+    // Reset activation flag when Mario is on the ground
+    if (!(player->mState & 0x800)) {
+        sFlightActivatedThisJump = false;
+    }
+
+    // Activate flight on triple jump (STATE_TRIPLE_J = 0x882), only once per jump
     bool tripleJump = ((player->mState & 0xFFF) == 0x882);
     bool inWater = (player->mState & 0x2000);
 
-    if (tripleJump && !inWater) {
+    if (tripleJump && !inWater && !sFlightActivatedThisJump) {
+        sFlightActivatedThisJump = true;
         startCapeFlight(player);
     }
 
@@ -78,8 +88,14 @@ BETTER_SMS_FOR_CALLBACK void onStageExit(TApplication *app) {
     sPlayerCapeData.persistAcrossLoad = false;
 }
 
+// DEBUG: Skip intro, go straight to Delfino Plaza episode 0
+BETTER_SMS_FOR_CALLBACK void onGameBoot(TApplication *app) {
+    app->mNextScene.set(TGameSequence::AREA_BIANCO, 1, JDrama::TFlagT<u16>(0));
+}
+
 static void initModule() {
     BetterSMS::registerModule(sModuleInfo);
+    Game::addBootCallback(onGameBoot);
     Player::addInitCallback(onPlayerInit);
     Player::addUpdateCallback(onPlayerUpdate);
     Stage::addExitCallback(onStageExit);
