@@ -63,18 +63,11 @@ BETTER_SMS_FOR_CALLBACK void onPlayerUpdate(TMario *player, bool isMario) {
     if (!cape->hasCape)
         return;
 
-    // Activate flight: jump while running fast
-    // A button just pressed + moving fast enough on ground
-    u32 padFrame = player->mController->mButtons.mFrameInput;
-    bool aPressed = (padFrame & 0x100);  // A button
-    bool airborne = (player->mState & 0x800);
-    bool fastEnough = (player->mForwardSpeed >= 20.0f);
+    // Activate flight on triple jump (STATE_TRIPLE_J = 0x882)
+    bool tripleJump = ((player->mState & 0xFFF) == 0x882);
+    bool inWater = (player->mState & 0x2000);
 
-    // Also allow D-pad Right as debug trigger while airborne
-    u32 padInput = player->mController->mButtons.mInput;
-    bool dpadRight = (padInput & 0x2);
-
-    if ((aPressed && fastEnough && !airborne) || (dpadRight && airborne)) {
+    if (tripleJump && !inWater) {
         startCapeFlight(player);
     }
 

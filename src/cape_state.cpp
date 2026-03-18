@@ -80,6 +80,10 @@ void updateCapeGlide(TMario *player) {
     if (stickX > 1.0f) stickX = 1.0f;
     if (stickX < -1.0f) stickX = -1.0f;
 
+    // Prevent spin jump during flight by clearing the stick rotation counter
+    // _534 (offset 0x534) is the stick rotation history count used by checkStickRotate()
+    player->_534 = 0;
+
     // ========================================
     // TAKEOFF
     // ========================================
@@ -95,6 +99,11 @@ void updateCapeGlide(TMario *player) {
         player->mSpeed.y = TAKEOFF_RISE_SPEED * riseFactor;
         player->mSpeed.z = TAKEOFF_FORWARD_SPEED * cosf(yawRad);
         player->mForwardSpeed = TAKEOFF_FORWARD_SPEED;
+
+        // Transition to flight animation partway through takeoff
+        if (sTakeoffTimer < 60) {
+            player->setAnimation(0x4C, 1.0f);  // fall/arms spread
+        }
 
         if (sTakeoffTimer <= 0) {
             sInTakeoff = false;
@@ -155,6 +164,9 @@ void updateCapeGlide(TMario *player) {
     if (sVerticalSpeed > 30.0f) sVerticalSpeed = 30.0f;
     if (sVerticalSpeed < -30.0f) sVerticalSpeed = -30.0f;
 
+    // Lock flight animation every frame
+    player->setAnimation(0x4C, 1.0f);  // fall/arms spread
+
     // Forward speed: drag + clamp
     cape->glideSpeed -= DRAG;
     if (cape->glideSpeed > MAX_SPEED) cape->glideSpeed = MAX_SPEED;
@@ -173,6 +185,24 @@ void updateCapeGlide(TMario *player) {
     player->mSpeed.y = sVerticalSpeed;
     player->mSpeed.z = cape->glideSpeed * cosf(yawRad);
     player->mForwardSpeed = cape->glideSpeed;
+
+    // Water collision
+    if (player->mTranslation.y <= player->mWaterHeight && player->mWaterHeight > -10000.0f) {
+        cape->isGliding = false;
+        player->mAngle.z = 0;
+        sVerticalSpeed = 0.0f;
+        sInTakeoff = false;
+        return;
+    }
+
+    // Wall collision
+    if (player->mWallTriangle != nullptr) {
+        cape->isGliding = false;
+        player->mAngle.z = 0;
+        sVerticalSpeed = 0.0f;
+        sInTakeoff = false;
+        return;
+    }
 
     // Ground collision (after grace)
     if (sFlightFrames > 60 && sVerticalSpeed < 0.0f && player->mTranslation.y <= player->mFloorBelow + 10.0f) {

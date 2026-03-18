@@ -23,7 +23,7 @@ constexpr u32 BTN_B = 0x200;
 constexpr u32 BTN_L = 0x4000;
 
 // Physics constants — all tunable, start conservative
-constexpr f32 CAPE_TIMER_DURATION   = 60.0f;   // seconds
+constexpr f32 CAPE_TIMER_DURATION   = 120.0f;  // doubled — BSE may call update at 60fps
 constexpr f32 CAPE_FADE_START       = 50.0f;   // seconds elapsed when fade begins
 constexpr f32 CAPE_BASE_GLIDE_SPEED = 20.0f;
 constexpr f32 CAPE_MAX_DIVE_SPEED   = 60.0f;
