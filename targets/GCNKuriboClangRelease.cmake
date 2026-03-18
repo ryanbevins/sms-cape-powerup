@@ -2,12 +2,9 @@ set(CMAKE_CROSSCOMPILING TRUE)
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR powerpc)
 
-# BSE directory relative to our project root
-set(BSE_DIR "${CMAKE_CURRENT_LIST_DIR}/../lib/BetterSunshineEngine")
-
-set(CMAKE_C_COMPILER "${BSE_DIR}/compiler/clang.exe")
-set(CMAKE_CXX_COMPILER "${BSE_DIR}/compiler/clang.exe")
-set(CMAKE_C_LINK_EXECUTABLE "${BSE_DIR}/compiler/clang.exe")
+set(CMAKE_C_COMPILER "${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/compiler/clang.exe")
+set(CMAKE_CXX_COMPILER "${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/compiler/clang.exe")
+set(CMAKE_C_LINK_EXECUTABLE "${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/compiler/clang.exe")
 
 set(triple powerpc-gecko-ibm-kuribo-eabi)
 set(CMAKE_C_COMPILER_TARGET ${triple})
@@ -19,17 +16,17 @@ endif(WIN32)
 
 set(CMAKE_SYSROOT "C:/msys64/mingw64")
 
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -T ${BSE_DIR}/linker.ld")
-set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld -T ${BSE_DIR}/linker.ld")
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld -T ${BSE_DIR}/linker.ld")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -T ${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/linker.ld")
+set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld -T ${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/linker.ld")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld -T ${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/linker.ld")
 
 set(CMAKE_CXX_STANDARD_LIBRARIES "")
 
 set(SMS_REGION us)
 
 set(SMS_COMPILE_DEFINES
-    -D__powerpc__ -DKURIBO_NO_TYPES
-    -DGEKKO -DNTSCU
+    -D__powerpc__ -DKURIBO_NO_TYPES -DNTSCU
+    -DGEKKO -DNDEBUG
 )
 
 set(SMS_COMPILE_FLAGS
@@ -38,7 +35,7 @@ set(SMS_COMPILE_FLAGS
 
     ${SMS_COMPILE_DEFINES}
 
-    -Os -fno-exceptions
+	-Os -fno-exceptions 
     -fno-rtti -ffast-math -fpermissive
     -fdeclspec -fno-unwind-tables
     -nodefaultlibs -nobuiltininc -nostdinc++ -nostdlib
@@ -46,7 +43,7 @@ set(SMS_COMPILE_FLAGS
     -fno-c++-static-destructors -fno-function-sections
     -fno-data-sections -fpermissive
 
-    -Werror -Wno-main
+    -Werror -Wno-main 
     -Wno-incompatible-library-redeclaration
 )
 
@@ -66,4 +63,4 @@ set(SMS_LINK_FLAGS
 set(CMAKE_C_COMPILER_FORCED TRUE)
 set(CMAKE_CXX_COMPILER_FORCED TRUE)
 
-set(CMAKE_OBJCOPY "${BSE_DIR}/compiler/powerpc-eabi-objcopy.exe" CACHE PATH "" FORCE)
+set(CMAKE_OBJCOPY "${PROJECT_SOURCE_DIR}/lib/BetterSunshineEngine/compiler/powerpc-eabi-objcopy.exe" CACHE PATH "" FORCE)
