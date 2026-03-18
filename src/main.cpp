@@ -1,8 +1,10 @@
 #include <BetterSMS/module.hxx>
+#include <BetterSMS/object.hxx>
 #include <BetterSMS/player.hxx>
 #include <BetterSMS/stage.hxx>
 #include <SMS/Player/Mario.hxx>
 #include <SMS/Player/MarioGamePad.hxx>
+#include "cape_box.hxx"
 #include "cape_data.hxx"
 #include "cape_timer.hxx"
 #include "cape_state.hxx"
@@ -55,6 +57,8 @@ static void initModule() {
     Player::addUpdateCallback(onPlayerUpdate);
     Stage::addExitCallback(onStageExit);
     Player::registerStateMachine(STATE_CAPE_GLIDE, capeGlideState);
+
+    BetterSMS::Objects::registerObjectAsMapObj("CapeBox", &capeBoxData, TCapeBox::instantiate);
 }
 
 KURIBO_MODULE_BEGIN("Cape Powerup", "SMS Decomp", "1.0") {
