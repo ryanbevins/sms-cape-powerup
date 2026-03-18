@@ -9,6 +9,8 @@
 #include "cape_timer.hxx"
 #include "cape_state.hxx"
 
+void updateCapeVisual(TMario *player);
+
 static BetterSMS::ModuleInfo sModuleInfo("Cape Powerup", 1, 0, nullptr);
 static CapeData sPlayerCapeData;
 
@@ -45,6 +47,8 @@ BETTER_SMS_FOR_CALLBACK void onPlayerUpdate(TMario *player, bool isMario) {
         cape->glideYaw   = (f32)(player->mAngle.y) / 182.04f;
         player->changePlayerStatus(STATE_CAPE_GLIDE, 0, false);
     }
+
+    updateCapeVisual(player);
 }
 
 BETTER_SMS_FOR_CALLBACK void onStageExit(TApplication *app) {
