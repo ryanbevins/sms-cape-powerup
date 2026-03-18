@@ -16,29 +16,38 @@ static constexpr f32 DEG_TO_RAD = PI / 180.0f;
 
 // Takeoff
 static constexpr s32 TAKEOFF_FRAMES = 90;
-static constexpr f32 TAKEOFF_RISE_SPEED = 42.0f;     // same as a normal jump's power
-static constexpr f32 TAKEOFF_FORWARD_SPEED = 32.0f;   // same as max run speed
+static constexpr f32 TAKEOFF_RISE_SPEED = 42.0f;
+static constexpr f32 TAKEOFF_FORWARD_SPEED = 32.0f;
 
 // Flight
-static constexpr f32 FLIGHT_GRAVITY = 0.25f;    // half of normal gravity — gliding is floaty
-static constexpr f32 DRAG = 0.02f;              // very slight — speed barely decays at neutral
+static constexpr f32 FLIGHT_GRAVITY = 0.25f;
+static constexpr f32 DRAG = 0.02f;
 static constexpr f32 MAX_SPEED = 70.0f;
 static constexpr f32 STALL_SPEED = 3.0f;
 static constexpr f32 YAW_SPEED = 0.67f;
 
-// Stick forward = dive: adds downward speed, gains forward speed from gravity
-static constexpr f32 DIVE_DOWN_FORCE = 5.0f;    // extra downward per frame at full stick (on top of gravity)
-static constexpr f32 DIVE_SPEED_GAIN = 1.2f;    // forward speed gained per frame at full dive
+// Dive
+static constexpr f32 DIVE_DOWN_FORCE = 5.0f;
+static constexpr f32 DIVE_SPEED_GAIN = 1.2f;
 
-// Stick back = climb: trades forward speed for upward movement
-static constexpr f32 CLIMB_UP_FORCE = 1.2f;     // upward force at full stick (before speed scaling)
-static constexpr f32 CLIMB_SPEED_COST = 0.09f;  // climbing costs meaningful speed
+// Climb
+static constexpr f32 CLIMB_UP_FORCE = 1.2f;
+static constexpr f32 CLIMB_SPEED_COST = 0.09f;
+
+// Ground pound dive bomb
+static constexpr f32 DIVEBOMB_SPEED = -25.0f;  // straight down, fast
+
+// Smooth landing
+static constexpr f32 LANDING_SPEED_CARRY = 0.6f;  // carry 60% of flight speed into run
 
 static s32 sTakeoffTimer = 0;
 static s32 sFlightFrames = 0;
 static bool sInTakeoff = false;
 static f32 sVerticalSpeed = 0.0f;
-static bool sFlightAnimSet = false;  // only set animation once to avoid sound restart
+static bool sFlightAnimSet = false;
+static f32 sCurrentRoll = 0.0f;
+static f32 sCurrentPitchTilt = 0.0f;
+static bool sDiveBombing = false;
 
 void startCapeFlight(TMario *player) {
     CapeData *cape = getCapeData(player);
@@ -52,19 +61,39 @@ void startCapeFlight(TMario *player) {
     sFlightFrames = 0;
     sVerticalSpeed = 0.0f;
     sFlightAnimSet = false;
+    sCurrentRoll = 0.0f;
+    sCurrentPitchTilt = 0.0f;
+    sDiveBombing = false;
     sInTakeoff = true;
 }
 
-static void endFlight(TMario *player, CapeData *cape) {
+static void endFlight(TMario *player, CapeData *cape, bool smoothLand) {
+    f32 landingSpeed = cape->glideSpeed;
+    f32 landingYaw = cape->glideYaw * DEG_TO_RAD;
+
     cape->isGliding = false;
     player->mAngle.z = 0;
-    player->mSpeed.x = 0.0f;
-    player->mSpeed.y = 0.0f;
-    player->mSpeed.z = 0.0f;
-    player->mForwardSpeed = 0.0f;
+    player->mAngle.x = 0;
     sVerticalSpeed = 0.0f;
     sInTakeoff = false;
-    // Force Mario into fall state so he doesn't resume the triple jump
+    sCurrentRoll = 0.0f;
+    sCurrentPitchTilt = 0.0f;
+    sDiveBombing = false;
+
+    if (smoothLand && landingSpeed > 5.0f) {
+        // Carry momentum into a run
+        f32 carrySpeed = landingSpeed * LANDING_SPEED_CARRY;
+        player->mSpeed.x = carrySpeed * sinf(landingYaw);
+        player->mSpeed.y = 0.0f;
+        player->mSpeed.z = carrySpeed * cosf(landingYaw);
+        player->mForwardSpeed = carrySpeed;
+    } else {
+        player->mSpeed.x = 0.0f;
+        player->mSpeed.y = 0.0f;
+        player->mSpeed.z = 0.0f;
+        player->mForwardSpeed = 0.0f;
+    }
+
     player->changePlayerStatus(0x88C, 0, false);  // STATE_FALL
 }
 
@@ -74,13 +103,13 @@ void updateCapeGlide(TMario *player) {
         return;
 
     if (!cape->hasCape) {
-        endFlight(player, cape);
+        endFlight(player, cape, false);
         return;
     }
 
     u32 padInput = player->mController->mButtons.mInput;
     if (padInput & 0x4) {  // D-pad Down exits
-        endFlight(player, cape);
+        endFlight(player, cape, false);
         return;
     }
 
@@ -92,8 +121,7 @@ void updateCapeGlide(TMario *player) {
     if (stickX > 1.0f) stickX = 1.0f;
     if (stickX < -1.0f) stickX = -1.0f;
 
-    // Prevent spin jump during flight by clearing the stick rotation counter
-    // _534 (offset 0x534) is the stick rotation history count used by checkStickRotate()
+    // Prevent spin jump during flight
     player->_534 = 0;
 
     // ========================================
@@ -114,14 +142,56 @@ void updateCapeGlide(TMario *player) {
 
         // Transition to glide pose partway through takeoff
         if (sTakeoffTimer < 60) {
-            player->setAnimation(0xAE, 0.0f);  // dive_wait, speed 0 = hold pose
+            player->setAnimation(0xAE, 0.0f);
         }
 
         if (sTakeoffTimer <= 0) {
             sInTakeoff = false;
             sFlightFrames = 0;
             cape->glideSpeed = TAKEOFF_FORWARD_SPEED;
-            sVerticalSpeed = 0.0f;  // start flight with zero vertical, gravity will pull
+            sVerticalSpeed = 0.0f;
+        }
+        return;
+    }
+
+    // ========================================
+    // DIVEBOMB — B pressed during flight
+    // ========================================
+    u32 padFrame = player->mController->mButtons.mFrameInput;
+    if ((padFrame & 0x200) && !sDiveBombing) {  // B button
+        sDiveBombing = true;
+        cape->glideSpeed *= 0.3f;  // kill most forward speed
+    }
+
+    if (sDiveBombing) {
+        // Straight down, fast
+        sVerticalSpeed = DIVEBOMB_SPEED;
+        player->mSpeed.x = cape->glideSpeed * sinf(cape->glideYaw * DEG_TO_RAD) * 0.5f;
+        player->mSpeed.y = sVerticalSpeed;
+        player->mSpeed.z = cape->glideSpeed * cosf(cape->glideYaw * DEG_TO_RAD) * 0.5f;
+        player->mForwardSpeed = cape->glideSpeed * 0.5f;
+
+        // Pitch Mario forward for divebomb look
+        player->mAngle.x = (s16)(45.0f * (32768.0f / 180.0f));
+        player->mAngle.z = 0;
+        player->mAngle.y = (s16)(cape->glideYaw * (32768.0f / 180.0f));
+
+        player->setAnimation(0xAE, 0.0f);
+
+        // Ground collision — divebomb always checks
+        if (player->mTranslation.y <= player->mFloorBelow + 15.0f) {
+            player->mTranslation.y = player->mFloorBelow;
+            player->mAngle.x = 0;
+            // TODO: ground pound shockwave / damage enemies
+            endFlight(player, cape, false);
+            return;
+        }
+
+        // Water collision
+        if (player->mTranslation.y <= player->mWaterHeight && player->mWaterHeight > -10000.0f) {
+            player->mAngle.x = 0;
+            endFlight(player, cape, false);
+            return;
         }
         return;
     }
@@ -131,67 +201,65 @@ void updateCapeGlide(TMario *player) {
     // ========================================
     sFlightFrames++;
 
-    // Yaw — now with normalized stick (-1 to 1), this should be sensible
+    // Yaw
     if (stickX > 0.2f || stickX < -0.2f) {
         cape->glideYaw -= stickX * YAW_SPEED;
     }
-    // Sync Mario's visual rotation to our yaw
     player->mAngle.y = (s16)(cape->glideYaw * (32768.0f / 180.0f));
 
-    // Roll — tilt Mario's model into the turn like SM64 wing cap
-    static f32 sCurrentRoll = 0.0f;
-    f32 targetRoll = -stickX * 35.0f;  // max 35 degrees of bank at full stick
-    sCurrentRoll += (targetRoll - sCurrentRoll) * 0.15f;  // smooth interpolation
+    // Roll — bank into turns
+    f32 targetRoll = -stickX * 35.0f;
+    sCurrentRoll += (targetRoll - sCurrentRoll) * 0.15f;
     player->mAngle.z = (s16)(sCurrentRoll * (32768.0f / 180.0f));
 
-    // --- Vertical speed: accumulates with drag ---
-    // Gravity always pulls down
-    sVerticalSpeed -= FLIGHT_GRAVITY;
+    // Pitch tilt — nose down when diving, nose up when climbing
+    f32 targetPitch = 0.0f;
+    if (stickY > 0.15f) {
+        targetPitch = stickY * 30.0f;   // tilt forward up to 30 degrees
+    } else if (stickY < -0.15f) {
+        targetPitch = stickY * 20.0f;   // tilt back up to 20 degrees
+    }
+    sCurrentPitchTilt += (targetPitch - sCurrentPitchTilt) * 0.12f;
+    player->mAngle.x = (s16)(sCurrentPitchTilt * (32768.0f / 180.0f));
 
-    // Vertical drag — the faster you're moving vertically, the more resistance
-    // This makes climbs and dives naturally plateau instead of being linear
+    // --- Vertical speed ---
+    sVerticalSpeed -= FLIGHT_GRAVITY;
     sVerticalSpeed *= 0.96f;
 
     if (stickY > 0.15f) {
-        // DIVING: extra downward force + gain forward speed
         sVerticalSpeed -= DIVE_DOWN_FORCE * stickY;
         cape->glideSpeed += DIVE_SPEED_GAIN * stickY;
     } else if (stickY < -0.15f) {
-        // CLIMBING: push upward, scaled by speed (fast = strong climb)
-        // Lift decreases as vertical speed increases (diminishing returns)
-        f32 climbInput = -stickY;  // 0 to 1
+        f32 climbInput = -stickY;
         f32 speedRatio = cape->glideSpeed / 20.0f;
         if (speedRatio > 2.0f) speedRatio = 2.0f;
         if (speedRatio < 0.3f) speedRatio = 0.3f;
         f32 liftReduction = 1.0f;
         if (sVerticalSpeed > 0.0f) {
-            // The higher we're already going up, the less additional lift we get
             liftReduction = 1.0f / (1.0f + sVerticalSpeed * 0.15f);
         }
         sVerticalSpeed += CLIMB_UP_FORCE * climbInput * speedRatio * liftReduction;
         cape->glideSpeed -= CLIMB_SPEED_COST * climbInput;
     }
 
-    // Clamp vertical speed so you can't rocket up or plummet
     if (sVerticalSpeed > 30.0f) sVerticalSpeed = 30.0f;
     if (sVerticalSpeed < -30.0f) sVerticalSpeed = -30.0f;
 
-    // Keep glide animation locked every frame (game tries to override it)
-    // setAnimation internally checks if ID matches, won't restart if same
-    player->setAnimation(0xAE, 0.0f);  // dive_wait, speed 0 = hold pose
+    // Glide animation
+    player->setAnimation(0xAE, 0.0f);
 
-    // Forward speed: drag + clamp
+    // Forward speed
     cape->glideSpeed -= DRAG;
     if (cape->glideSpeed > MAX_SPEED) cape->glideSpeed = MAX_SPEED;
     if (cape->glideSpeed < 0.0f) cape->glideSpeed = 0.0f;
 
-    // Stall (after grace)
+    // Stall
     if (sFlightFrames > 60 && cape->glideSpeed < STALL_SPEED) {
-        endFlight(player, cape);
+        endFlight(player, cape, false);
         return;
     }
 
-    // --- Apply velocity via mSpeed ---
+    // Apply velocity
     f32 yawRad = cape->glideYaw * DEG_TO_RAD;
     player->mSpeed.x = cape->glideSpeed * sinf(yawRad);
     player->mSpeed.y = sVerticalSpeed;
@@ -200,20 +268,20 @@ void updateCapeGlide(TMario *player) {
 
     // Water collision
     if (player->mTranslation.y <= player->mWaterHeight && player->mWaterHeight > -10000.0f) {
-        endFlight(player, cape);
+        endFlight(player, cape, false);
         return;
     }
 
     // Wall collision
     if (player->mWallTriangle != nullptr) {
-        endFlight(player, cape);
+        endFlight(player, cape, false);
         return;
     }
 
-    // Ground collision (after grace)
+    // Ground collision (smooth landing)
     if (sFlightFrames > 60 && sVerticalSpeed < 0.0f && player->mTranslation.y <= player->mFloorBelow + 10.0f) {
         player->mTranslation.y = player->mFloorBelow;
-        endFlight(player, cape);
+        endFlight(player, cape, true);  // smooth land with momentum carry
         return;
     }
 }
